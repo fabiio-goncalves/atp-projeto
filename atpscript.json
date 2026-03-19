@@ -1,0 +1,1028 @@
+// ============================================================================
+// MASTER ATP TENNIS DATABASE CLEANING SCRIPT - VERSÃO 3.0
+// ============================================================================
+// Versão: 3.0 - Setup Automático Completo
+// Execução: mongosh --file atpscript.js
+// ============================================================================
+
+// Conectar à base de dados
+use atp;
+
+print("╔════════════════════════════════════════════════════════════════╗");
+print("║   ATP TENNIS DATABASE - SETUP AUTOMÁTICO v3.0                 ║");
+print("╚════════════════════════════════════════════════════════════════╝\n");
+
+// ============================================================================
+// 0. IMPORT AUTOMÁTICO DE DADOS EXTERNOS
+// ============================================================================
+
+print("═══ VERIFICANDO E IMPORTANDO DADOS ═══\n");
+
+const dataPath = "c:/data/atp/";
+const collections = [
+    { name: "CountryCode", file: "countries_net.csv" },
+    { name: "player_db", file: "player_db.csv" },
+    { name: "World_Cities", file: "World_Cities.csv" },
+    { name: "cities", file: "cities.csv" }
+];
+
+function importCollection(collectionName, fileName) {
+    const fullPath = dataPath + fileName;
+    const exists = db.getCollection(collectionName).countDocuments();
+    
+    if (exists > 0) {
+        print(`✓ ${collectionName} já existe (${exists} documentos)`);
+        return true;
+    }
+    
+    print(`→ Importando ${collectionName} de ${fileName}...`);
+    
+    try {
+        // Usar função nativa do mongosh para ler CSV
+        const result = cat(fullPath);
+        if (!result) {
+            print(`  ⚠ AVISO: Não foi possível ler ${fullPath}`);
+            print(`  → Execute manualmente: mongoimport --db atpplayers --collection ${collectionName} --type csv --headerline --file "${fullPath}"`);
+            return false;
+        }
+        
+        // Parse CSV manualmente
+        const lines = result.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim());
+        const documents = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+            if (lines[i].trim() === '') continue;
+            
+            const values = lines[i].split(',');
+            const doc = {};
+            
+            for (let j = 0; j < headers.length; j++) {
+                doc[headers[j]] = values[j] ? values[j].trim() : "";
+            }
+            
+            documents.push(doc);
+        }
+        
+        if (documents.length > 0) {
+            db.getCollection(collectionName).insertMany(documents);
+            print(`  ✓ ${documents.length} documentos importados`);
+            return true;
+        }
+    } catch (e) {
+        print(`  ⚠ ERRO ao importar ${collectionName}: ${e.message}`);
+        print(`  → Execute manualmente: mongoimport --db atpplayers --collection ${collectionName} --type csv --headerline --file "${dataPath}${fileName}"`);
+        return false;
+    }
+    
+    return false;
+}
+
+// NOTA IMPORTANTE: O mongosh não pode executar mongoimport diretamente
+// Esta seção verifica se as coleções existem
+print("VERIFICAÇÃO DE DADOS:\n");
+
+let allDataPresent = true;
+collections.forEach(col => {
+    const count = db.getCollection(col.name).countDocuments();
+    if (count > 0) {
+        print(`✓ ${col.name}: ${count} documentos`);
+    } else {
+        print(`✗ ${col.name}: VAZIO - precisa ser importado`);
+        print(`  Execute: mongoimport --db atpplayers --collection ${col.name} --type csv --headerline --file "${dataPath}${col.file}"`);
+        allDataPresent = false;
+    }
+});
+
+if (!allDataPresent) {
+    print("\n⚠ ATENÇÃO: Alguns dados estão em falta!");
+    print("Execute os comandos mongoimport acima antes de continuar.\n");
+    print("Ou use o script batch fornecido: run_atp_import.bat\n");
+    print("Pressione Ctrl+C para cancelar ou Enter para continuar de qualquer forma...\n");
+}
+
+print("\n");
+
+// ============================================================================
+// 1. CRIANDO ÍNDICES
+// ============================================================================
+
+print("═══ CRIANDO ÍNDICES ═══");
+
+try {
+    db.CountryCode.createIndex({ Name: 1 }, { background: true });
+    db.CountryCode.createIndex({ Code: 1 }, { background: true });
+    
+    db.World_Cities.createIndex({ City: 1 }, { background: true });
+    db.World_Cities.createIndex({ Country: 1 }, { background: true });
+    db.World_Cities.createIndex({ City: 1, Country: 1 }, { background: true });
+    db.World_Cities.createIndex({ CountryCode: 1 }, { background: true });
+    
+    db.atpplayers.createIndex({ PlayerName: 1 }, { background: true });
+    db.atpplayers.createIndex({ Tournament: 1 }, { background: true });
+    
+    db.Players.createIndex({ LinkPlayer: 1 }, { unique: true, background: true, sparse: true });
+    db.Players.createIndex({ PlayerName: 1 }, { background: true });
+    db.Players.createIndex({ CountryCode: 1 }, { background: true });
+    
+    db.player_db.createIndex({ full_name: 1 }, { background: true });
+    db.player_db.createIndex({ iso2: 1 }, { background: true });
+    
+    db.Tournaments.createIndex({ Tournament: 1, Date: 1 }, { unique: true, background: true, sparse: true });
+    db.Tournaments.createIndex({ CountryCode: 1 }, { background: true });
+    
+    db.Player_Per_Game.createIndex({ player_mongo_id: 1 }, { background: true });
+    db.Player_Per_Game.createIndex({ tournament_mongo_id: 1 }, { background: true });
+    
+    print("✓ Índices criados\n");
+} catch (e) {
+    print("⚠ Aviso ao criar índices: " + e.message + "\n");
+}
+
+// ============================================================================
+// 2. NORMALIZAÇÃO DE COUNTRYCODE
+// ============================================================================
+
+print("═══ NORMALIZANDO COUNTRYCODE ═══");
+
+const historicalCountries = [
+    { Code: "CS", Name: "Czechoslovakia" },
+    { Code: "YU", Name: "Yugoslavia" },
+    { Code: "XK", Name: "Kosovo" },
+    { Code: "TW", Name: "Taiwan" },
+    { Code: "UNK", Name: "Unknown" }
+];
+
+historicalCountries.forEach(country => {
+    db.CountryCode.updateOne(
+        { Code: country.Code },
+        { $setOnInsert: country },
+        { upsert: true }
+    );
+});
+
+db.CountryCode.updateOne({ Code: "VN" }, { $set: { Name: "Vietnam" } });
+
+// Simplificar nomes de países com vírgula (ex: "Iran, Islamic Republic of" → "Iran")
+// Exceto: "Korea, Democratic People's Republic of" (Coreia do Norte)
+db.CountryCode.updateMany(
+    {
+        Name: { $regex: /,/ },
+        Name: { $ne: "Korea, Democratic People's Republic of" }
+    },
+    [
+        {
+            $set: {
+                Name: {
+                    $trim: {
+                        input: { $arrayElemAt: [{ $split: ["$Name", ","] }, 0] }
+                    }
+                }
+            }
+        }
+    ]
+);
+
+const countryCount = db.CountryCode.countDocuments();
+print(`✓ ${countryCount} códigos de países normalizados\n`);
+
+// ============================================================================
+// 3. PREPARAÇÃO DE WORLD_CITIES
+// ============================================================================
+
+print("═══ PREPARANDO WORLD_CITIES ═══");
+
+// Adicionar CountryCode às cidades (sem normalização - será feito nos Tournaments)
+db.World_Cities.aggregate([
+    {
+        $lookup: {
+            from: "CountryCode",
+            localField: "Country",
+            foreignField: "Name",
+            as: "countryInfo"
+        }
+    },
+    {
+        $set: {
+            CountryCode: { $arrayElemAt: ["$countryInfo.Code", 0] }
+        }
+    },
+    {
+        $project: { countryInfo: 0 }
+    },
+    {
+        $merge: {
+            into: "World_Cities",
+            on: "_id",
+            whenMatched: "merge"
+        }
+    }
+], { allowDiskUse: true });
+
+const cityCount = db.World_Cities.countDocuments();
+print(`✓ ${cityCount} cidades preparadas\n`);
+
+// ============================================================================
+// 4. CRIAÇÃO DE PLAYERS
+// ============================================================================
+
+print("═══ CRIANDO COLEÇÃO PLAYERS ═══");
+
+db.atpplayers.aggregate([
+    {
+        $group: {
+            _id: "$LinkPlayer",
+            PlayerName: { $first: "$PlayerName" },
+            Born: { $first: "$Born" },
+            Height: { $first: "$Height" },
+            Hand: { $first: "$Hand" },
+            LinkPlayer: { $first: "$LinkPlayer" }
+        }
+    },
+    {
+        $project: {
+            _id: 0,
+            LinkPlayer: 1,
+            PlayerName: 1,
+            Born: 1,
+            Height: 1,
+            Hand: 1
+        }
+    },
+    {
+        $merge: {
+            into: "Players",
+            on: "LinkPlayer",
+            whenMatched: "keepExisting",
+            whenNotMatched: "insert"
+        }
+    }
+], { allowDiskUse: true });
+
+const playerCount = db.Players.countDocuments();
+print(`✓ ${playerCount} jogadores extraídos\n`);
+
+// ============================================================================
+// 5. DIVIDINDO CAMPOS COMPOSTOS
+// ============================================================================
+
+print("═══ PROCESSANDO CAMPOS COMPOSTOS ═══");
+
+// Hand → FrontHand + BackHand
+db.Players.aggregate([
+    {
+        $addFields: {
+            FrontHand: { $arrayElemAt: [{ $split: ["$Hand", ", "] }, 0] },
+            BackHand: { $arrayElemAt: [{ $split: ["$Hand", ", "] }, 1] }
+        }
+    },
+    {
+        $project: { Hand: 0 }
+    },
+    {
+        $merge: {
+            into: "Players",
+            on: "_id",
+            whenMatched: "merge"
+        }
+    }
+], { allowDiskUse: true });
+
+// Born → BornCity + BornCountry
+db.Players.updateMany(
+    {},
+    [
+        {
+            $set: {
+                parts: { $split: ["$Born", ","] },
+                numParts: { $size: { $split: ["$Born", ","] } }
+            }
+        },
+        {
+            $set: {
+                BornCity: {
+                    $cond: [
+                        { $gte: ["$numParts", 2] },
+                        { $trim: { input: { $arrayElemAt: ["$parts", 0] } } },
+                        ""
+                    ]
+                },
+                BornCountry: {
+                    $cond: [
+                        { $eq: ["$numParts", 1] },
+                        { $trim: { input: { $arrayElemAt: ["$parts", 0] } } },
+                        { $trim: { input: { $arrayElemAt: ["$parts", -1] } } }
+                    ]
+                }
+            }
+        },
+        {
+            $unset: ["parts", "numParts", "Born"]
+        }
+    ]
+);
+
+print("✓ Campos divididos\n");
+
+// ============================================================================
+// 6. MATCHING PLAYERS COM PLAYER_DB
+// ============================================================================
+
+print("═══ MATCHING PLAYERS → COUNTRYCODE ═══");
+
+let matched = 0;
+let total = 0;
+const batchSize = 1000;
+
+// Cache do player_db
+const playerDbCache = {};
+db.player_db.find({}, { full_name: 1, iso2: 1, name_first: 1, name_last: 1 }).forEach(p => {
+    if (p.full_name) playerDbCache[p.full_name.toLowerCase()] = p.iso2;
+    const key = (p.name_first + " " + p.name_last).toLowerCase();
+    if (!playerDbCache[key]) playerDbCache[key] = p.iso2;
+});
+
+print(`→ Cache: ${Object.keys(playerDbCache).length} entradas`);
+
+db.Players.find({ $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }] })
+    .forEach(player => {
+        total++;
+        
+        if (!player.PlayerName) return;
+        
+        const normalized = player.PlayerName
+            .replace(/[\.\-]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+        
+        if (playerDbCache[normalized]) {
+            db.Players.updateOne(
+                { _id: player._id },
+                { $set: { CountryCode: playerDbCache[normalized] } }
+            );
+            matched++;
+        }
+        
+        if (total % batchSize === 0) {
+            print(`  ${total} processados | ${matched} matched`);
+        }
+    });
+
+print(`✓ ${matched}/${total} matched via player_db\n`);
+
+// ============================================================================
+// 7. MATCHING POR BORNCOUNTRY
+// ============================================================================
+
+print("═══ MATCHING POR PAÍS DE NASCIMENTO ═══");
+
+const hardcodeMap = {
+    "Czechoslovakia": "CS", "Yugoslavia": "YU", "Chinese Taipei": "TW",
+    "New York": "US", "Illinois": "US", "Tennessee": "US", "North Carolina": "US",
+    "Slovak Republic": "SK", "Bosnia-Herzegovina": "BA", "Bosnia": "BA",
+    "Hong Kong": "HK", "Lisboa": "PT", "Sao Paulo": "BR", "São Paulo": "BR",
+    "Tahiti": "PF", "AUS": "AU", "RSA": "ZA", "Korea (South)": "KR",
+    "Czech Rep.": "CZ", "ARG": "AR", "U.S.A.": "US", "Great Britain": "GB",
+    "The Netherlands": "NL", "Korea": "KR", "Bahamas": "BS", "Kiev": "UA",
+    "Brasil": "BR", "Moscow": "RU", "Russia": "RU"
+};
+
+let countryMatched = 0;
+
+db.Players.find({ 
+    $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }],
+    BornCountry: { $ne: null, $ne: "" }
+}).forEach(player => {
+    const country = player.BornCountry.trim();
+    
+    // Match direto
+    let countryDoc = db.CountryCode.findOne({ Name: { $regex: new RegExp("^" + country + "$", "i") } });
+    
+    if (countryDoc?.Code) {
+        db.Players.updateOne({ _id: player._id }, { $set: { CountryCode: countryDoc.Code } });
+        countryMatched++;
+        return;
+    }
+    
+    // Por cidade
+    if (player.BornCity) {
+        let cityDoc = db.World_Cities.findOne({ City: { $regex: new RegExp("^" + player.BornCity + "$", "i") } });
+        if (cityDoc?.CountryCode) {
+            db.Players.updateOne({ _id: player._id }, { $set: { CountryCode: cityDoc.CountryCode } });
+            countryMatched++;
+            return;
+        }
+    }
+    
+    // Hardcode
+    if (hardcodeMap[country]) {
+        db.Players.updateOne({ _id: player._id }, { $set: { CountryCode: hardcodeMap[country] } });
+        countryMatched++;
+        return;
+    }
+    
+    // Siglas → USA
+    if (/^[A-Z]{2}$/.test(country)) {
+        db.Players.updateOne({ _id: player._id }, { $set: { CountryCode: "US" } });
+        countryMatched++;
+    }
+});
+
+print(`✓ ${countryMatched} matched por país\n`);
+
+// ============================================================================
+// 8. CORREÇÕES ESPECÍFICAS
+// ============================================================================
+
+print("═══ APLICANDO CORREÇÕES ═══");
+
+// Alturas
+const heightFixes = [
+    { PlayerName: "Grant Stafford", BornCountry: "South Africa", Height: 15, correctHeight: 188 },
+    { PlayerName: "Carlos Di Laura", BornCountry: "Peru", Height: 510, correctHeight: 175 }
+];
+
+heightFixes.forEach(fix => {
+    db.Players.updateOne(
+        { PlayerName: fix.PlayerName, Height: fix.Height },
+        { $set: { Height: fix.correctHeight } }
+    );
+});
+
+db.Players.updateMany({ Height: "NA" }, { $set: { Height: 0 } });
+db.Players.updateMany({ FrontHand: "null" }, { $set: { FrontHand: "Unknown" } });
+
+// UNK para restantes
+const unkPlayers = db.Players.updateMany(
+    { $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }] },
+    { $set: { CountryCode: "UNK" } }
+);
+
+print(`✓ ${unkPlayers.modifiedCount} com 'UNK'\n`);
+
+// ============================================================================
+// 9. CRIAÇÃO DE TOURNAMENTS
+// ============================================================================
+
+print("═══ CRIANDO TOURNAMENTS ═══");
+
+db.atpplayers.aggregate([
+    {
+        $group: {
+            _id: { tournament: "$Tournament", date: "$Date" },
+            Tournament: { $first: "$Tournament" },
+            Location: { $first: "$Location" },
+            Date: { $first: "$Date" },
+            Ground: { $first: "$Ground" },
+            Prize: { $first: "$Prize" }
+        }
+    },
+    {
+        $project: { _id: 0 }
+    },
+    {
+        $merge: {
+            into: "Tournaments",
+            on: ["Tournament", "Date"],
+            whenMatched: "keepExisting",
+            whenNotMatched: "insert"
+        }
+    }
+], { allowDiskUse: true });
+
+// Remover datas inválidas
+db.Tournaments.deleteMany({
+    $expr: {
+        $let: {
+            vars: { dateStart: { $arrayElemAt: [{ $split: ["$Date", " - "] }, 0] } },
+            in: {
+                $or: [
+                    { $lt: [{ $dateFromString: { dateString: "$$dateStart", format: "%Y.%m.%d", onError: null } }, ISODate("1973-03-28")] },
+                    { $gt: [{ $dateFromString: { dateString: "$$dateStart", format: "%Y.%m.%d", onError: null } }, ISODate("2022-02-14")] },
+                    { $eq: [{ $dateFromString: { dateString: "$$dateStart", format: "%Y.%m.%d", onError: null } }, null] }
+                ]
+            }
+        }
+    }
+});
+
+const tournamentCount = db.Tournaments.countDocuments();
+print(`✓ ${tournamentCount} torneios criados\n`);
+
+// ============================================================================
+// 10. PROCESSAMENTO DE TOURNAMENTS
+// ============================================================================
+
+print("═══ PROCESSANDO TOURNAMENTS ═══");
+
+// Location → City + Country + Extração de F-number (tudo junto)
+db.Tournaments.aggregate([
+    {
+        $addFields: {
+            locationParts: { $split: ["$Location", ", "] },
+            numParts: { $size: { $split: ["$Location", ", "] } },
+            // Detectar se Tournament termina com " F" + número
+            fnumberMatch: {
+                $regexFind: {
+                    input: { $ifNull: ["$Tournament", ""] },
+                    regex: /\s+F\d+$/i
+                }
+            }
+        }
+    },
+    {
+        $addFields: {
+            TournamentCity: {
+                $cond: [
+                    { $eq: ["$numParts", 1] },
+                    "",
+                    { $arrayElemAt: ["$locationParts", 0] }
+                ]
+            },
+            TournamentCountry: {
+                $cond: [
+                    // Se encontrou padrão F-number
+                    { $ne: ["$fnumberMatch", null] },
+                    // Extrair tudo antes do " F[número]"
+                    {
+                        $trim: {
+                            input: {
+                                $substr: [
+                                    "$Tournament",
+                                    0,
+                                    "$fnumberMatch.idx"
+                                ]
+                            }
+                        }
+                    },
+                    // Senão, extrai do Location
+                    {
+                        $cond: [
+                            { $eq: ["$numParts", 1] },
+                            { $arrayElemAt: ["$locationParts", 0] },
+                            { $arrayElemAt: ["$locationParts", -1] }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    {
+        $project: { Location: 0, locationParts: 0, numParts: 0, fnumberMatch: 0 }
+    },
+    {
+        $merge: { into: "Tournaments", on: "_id", whenMatched: "merge" }
+    }
+], { allowDiskUse: true });
+
+print("✓ Location dividido e países F[número] extraídos\n");
+
+// Date → StartDate + EndDate
+db.Tournaments.aggregate([
+    {
+        $set: {
+            StartDate: {
+                $dateFromString: {
+                    dateString: { $trim: { input: { $arrayElemAt: [{ $split: ["$Date", " - "] }, 0] } } },
+                    format: "%Y.%m.%d",
+                    onError: null
+                }
+            },
+            EndDate: {
+                $dateFromString: {
+                    dateString: { $trim: { input: { $arrayElemAt: [{ $split: ["$Date", " - "] }, 1] } } },
+                    format: "%Y.%m.%d",
+                    onError: null
+                }
+            }
+        }
+    },
+    {
+        $merge: { into: "Tournaments", on: "_id", whenMatched: "merge" }
+    }
+], { allowDiskUse: true });
+
+// Normalizar
+db.Tournaments.updateMany({ Ground: "" }, { $set: { Ground: "Unknown" } });
+db.Tournaments.updateMany({ Prize: "" }, { $set: { Prize: "Unknown" } });
+
+// Grand Slams
+const gsPatterns = [/wim/i, /roland\sgarros/i, /australian\sopen/i, /us\s*open/i];
+db.Tournaments.find({}, { Tournament: 1 }).forEach(doc => {
+    const isGS = gsPatterns.some(r => r.test(doc.Tournament || ""));
+    db.Tournaments.updateOne({ _id: doc._id }, { $set: { grand_slam: isGS } });
+});
+
+print("✓ Campos processados\n");
+
+// ============================================================================
+// 11. MATCHING TOURNAMENTS → COUNTRYCODE
+// ============================================================================
+
+print("═══ NORMALIZANDO PAÍSES DOS TOURNAMENTS ═══");
+
+// Mapa completo de normalizações de países nos Tournaments
+const tournamentCountryMap = {
+    // HTML entities e caracteres especiais
+    "Bosnia &amp; Herzegovina": "Bosnia and Herzegovina",
+    "Bosnia & Herzegovina": "Bosnia and Herzegovina",
+    "Bosnia-Herzegovina": "Bosnia and Herzegovina",
+    "Bosnia": "Bosnia and Herzegovina",
+    "SErgia &amp; M": "Serbia",
+    "Serbia &amp; Montenegro": "Serbia",
+    
+    // Variações de nomes de países
+    "BRA": "Brazil",
+    "Braz": "Brazil",
+    "Brasil": "Brazil",
+    "Canda": "Canada",
+    "Columbia": "Colombia",
+    "Col": "Colombia",
+    "Crotia": "Croatia",
+    "Czechia": "Czech Republic",
+    "Czech Rep.": "Czech Republic",
+    "Czech.": "Czech Republic",
+    
+    // Itália
+    "Ita": "Italy",
+    "Verona": "Italy",
+    
+    // Great Britain e UK
+    "Great Britain": "United Kingdom",
+    
+    // Coreia
+    "South Korea": "Korea",
+    "Korea (South)": "Korea",
+    
+    // Outros países
+    "Moldovia": "Moldova",
+    "North Macedonia": "Macedonia",
+    "Slovak Republic": "Slovakia",
+    "Slovkia": "Slovakia",
+    "Solvenia": "Slovenia",
+    "Syria": "Syrian Arab Republic",
+    "Türkiye": "Turkey",
+    
+    // Taiwan
+    "Chinese Taipei": "Taiwan",
+    "Taipei": "Taiwan",
+    
+    // Holanda
+    "The Netherlands": "Netherlands",
+    "The Nethe": "Netherlands",
+    "NED": "Netherlands",
+    "Dutch Anti": "Netherlands",
+    "Dutch Antil": "Netherlands",
+    "Elndhoven": "Netherlands",
+    
+    // Rússia
+    "Russia": "Russian Federation",
+    "Moscow": "Russian Federation",
+    "Saint-Petersburg": "Russian Federation",
+    
+    // Outros
+    "Reunion Island": "Réunion",
+    
+    // Estados Unidos - abreviações e variações
+    "USA": "United States",
+    "U.S.A.": "United States",
+    "U.S.A": "United States",
+    "FL": "United States",
+    "Maiu": "United States",
+    
+    // América do Sul
+    "ARG": "Argentina",
+    "Marco Juarez": "Argentina",
+    "Sao Paulo": "Brazil",
+    "São Paulo": "Brazil",
+    "São Bernardo do Campo": "Brazil",
+    "Urugay": "Uruguay",
+    "Venezeuela": "Venezuela",
+    
+    // Outros
+    "AUS": "Australia",
+    "RSA": "South Africa",
+    "Lisboa": "Portugal",
+    "Kiev": "Ukraine",
+    "Sant Carles de la Rapita": "Spain"
+};
+
+Object.entries(tournamentCountryMap).forEach(([wrong, correct]) => {
+    db.Tournaments.updateMany({ TournamentCountry: wrong }, { $set: { TournamentCountry: correct } });
+});
+
+print("✓ Países normalizados");
+
+// Estados dos EUA (siglas de 2 letras)
+db.Tournaments.updateMany(
+    { TournamentCountry: { $regex: /^[A-Z]{2}$/ } }, 
+    { $set: { TournamentCountry: "United States" } }
+);
+
+print("✓ Estados US normalizados\n");
+
+print("═══ MATCHING TOURNAMENTS → COUNTRYCODE ═══");
+
+let matchedByCountryCode = 0;
+let matchedByWorldCities = 0;
+let matchedByCityLookup = 0;
+
+// 1. Match direto por TournamentCountry em CountryCode
+db.Tournaments.aggregate([
+    {
+        $match: { 
+            $and: [
+                { $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }] },
+                { TournamentCountry: { $ne: null, $ne: "" } }
+            ]
+        }
+    },
+    {
+        $lookup: {
+            from: "CountryCode",
+            let: { country: "$TournamentCountry" },
+            pipeline: [
+                {
+                    $match: {
+                        $expr: {
+                            $eq: [
+                                { $toLower: "$Name" },
+                                { $toLower: "$$country" }
+                            ]
+                        }
+                    }
+                }
+            ],
+            as: "match"
+        }
+    },
+    {
+        $match: { match: { $ne: [] } }
+    },
+    {
+        $set: { CountryCode: { $arrayElemAt: ["$match.Code", 0] } }
+    },
+    {
+        $project: { match: 0 }
+    },
+    {
+        $merge: { into: "Tournaments", on: "_id", whenMatched: "merge" }
+    }
+], { allowDiskUse: true });
+
+matchedByCountryCode = db.Tournaments.countDocuments({ 
+    CountryCode: { $nin: [null, "", "UNK"] } 
+});
+print(`→ ${matchedByCountryCode} matched via CountryCode`);
+
+// 2. Match por TournamentCountry como Country em World_Cities
+const pendingAfterCountryCode = db.Tournaments.countDocuments({
+    $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }]
+});
+print(`→ ${pendingAfterCountryCode} torneios ainda sem CountryCode`);
+
+let candidatesForWorldCitiesCountry = 0;
+db.Tournaments.find({
+    $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }],
+    TournamentCountry: { $ne: null, $ne: "", $exists: true }
+}).forEach(tournament => {
+    // Validar que TournamentCountry existe e não é undefined
+    if (!tournament.TournamentCountry) return;
+    
+    candidatesForWorldCitiesCountry++;
+    
+    const cityDoc = db.World_Cities.findOne({
+        Country: { $regex: new RegExp("^" + tournament.TournamentCountry.trim() + "$", "i") }
+    });
+    
+    if (cityDoc?.CountryCode) {
+        db.Tournaments.updateOne(
+            { _id: tournament._id },
+            { $set: { CountryCode: cityDoc.CountryCode } }
+        );
+        matchedByWorldCities++;
+    }
+});
+
+print(`→ ${candidatesForWorldCitiesCountry} candidatos verificados em World_Cities.Country`);
+print(`→ ${matchedByWorldCities} matched via World_Cities.Country`);
+
+// 3. Match por TournamentCity em World_Cities
+let candidatesForWorldCitiesCity = 0;
+db.Tournaments.find({
+    $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }],
+    TournamentCity: { $ne: null, $ne: "", $exists: true }
+}).forEach(tournament => {
+    // Validar que TournamentCity existe e não é undefined
+    if (!tournament.TournamentCity) return;
+    
+    candidatesForWorldCitiesCity++;
+    
+    const cityDoc = db.World_Cities.findOne({
+        City: { $regex: new RegExp("^" + tournament.TournamentCity.trim() + "$", "i") }
+    });
+    
+    if (cityDoc?.CountryCode) {
+        db.Tournaments.updateOne(
+            { _id: tournament._id },
+            { $set: { CountryCode: cityDoc.CountryCode } }
+        );
+        matchedByCityLookup++;
+    }
+});
+
+print(`→ ${candidatesForWorldCitiesCity} candidatos verificados em World_Cities.City`);
+print(`→ ${matchedByCityLookup} matched via World_Cities.City`);
+
+const totalMatched = matchedByCountryCode + matchedByWorldCities + matchedByCityLookup;
+print(`✓ Total matched: ${totalMatched}\n`);
+
+// 4. Atribuir UNK aos restantes
+const unkTournaments = db.Tournaments.updateMany(
+    { $or: [{ CountryCode: { $exists: false } }, { CountryCode: null }, { CountryCode: "" }] },
+    { $set: { CountryCode: "UNK" } }
+);
+
+print(`✓ ${unkTournaments.modifiedCount} torneios com 'UNK'\n`);
+
+// ============================================================================
+// 12. CRIAÇÃO DE PLAYER_PER_GAME
+// ============================================================================
+
+print("═══ CRIANDO PLAYER_PER_GAME ═══");
+
+print("→ Criando mapas...");
+const playerMapById = {};
+const tournamentMapById = {};
+
+db.Players.find({}, { PlayerName: 1, _id: 1 }).forEach(p => {
+    playerMapById[p.PlayerName] = p._id.toString();
+});
+
+db.Tournaments.find({}, { Tournament: 1, _id: 1 }).forEach(t => {
+    tournamentMapById[t.Tournament] = t._id.toString();
+});
+
+print(`  ✓ ${Object.keys(playerMapById).length} players`);
+print(`  ✓ ${Object.keys(tournamentMapById).length} tournaments\n`);
+
+const totalDocs = db.atpplayers.countDocuments();
+const insertBatchSize = 5000;
+let processed = 0;
+let inserted = 0;
+let bulk = [];
+
+print(`→ Processando ${totalDocs} documentos...`);
+
+db.atpplayers.find().forEach(doc => {
+    const playerId = playerMapById[doc.PlayerName];
+    const tournamentId = tournamentMapById[doc.Tournament];
+    
+    if (playerId && tournamentId) {
+        bulk.push({
+            player_mongo_id: playerId,
+            tournament_mongo_id: tournamentId,
+            GameRound: doc.GameRound,
+            GameRank: doc.GameRank,
+            Oponent: doc.Oponent,
+            WL: doc.WL,
+            Score: doc.Score
+        });
+    }
+    
+    processed++;
+    
+    if (bulk.length >= insertBatchSize) {
+        try {
+            db.Player_Per_Game.insertMany(bulk, { ordered: false });
+            inserted += bulk.length;
+            if (processed % 50000 === 0) {
+                print(`  ${((processed/totalDocs)*100).toFixed(1)}% - ${inserted} inseridos`);
+            }
+        } catch (e) {
+            if (!e.message.includes("duplicate")) {
+                print("  ⚠ Erro: " + e.message);
+            }
+        }
+        bulk = [];
+    }
+});
+
+if (bulk.length > 0) {
+    try {
+        db.Player_Per_Game.insertMany(bulk, { ordered: false });
+        inserted += bulk.length;
+    } catch (e) {}
+}
+
+print(`✓ ${inserted} jogos inseridos\n`);
+
+// ============================================================================
+// 13. LIMPEZA FINAL
+// ============================================================================
+
+print("═══ LIMPEZA FINAL ═══");
+
+// Remover byes
+const byeResult = db.Player_Per_Game.deleteMany({ Oponent: "bye" });
+print(`✓ ${byeResult.deletedCount} byes removidos`);
+
+// Remover duplicados
+const beforeDup = db.Player_Per_Game.countDocuments();
+const duplicates = [];
+
+db.Player_Per_Game.aggregate([
+    {
+        $group: {
+            _id: {
+                player: "$player_mongo_id",
+                tournament: "$tournament_mongo_id",
+                round: "$GameRound",
+                opponent: "$Oponent",
+                wl: "$WL",
+                score: "$Score"
+            },
+            ids: { $addToSet: "$_id" },
+            count: { $sum: 1 }
+        }
+    },
+    {
+        $match: { count: { $gt: 1 } }
+    }
+], { allowDiskUse: true }).forEach(doc => {
+    doc.ids.shift();
+    duplicates.push(...doc.ids);
+});
+
+if (duplicates.length > 0) {
+    db.Player_Per_Game.deleteMany({ _id: { $in: duplicates } });
+}
+
+const afterDup = db.Player_Per_Game.countDocuments();
+print(`✓ ${beforeDup - afterDup} duplicados removidos`);
+
+// Normalizar Score
+db.Player_Per_Game.aggregate([
+    {
+        $addFields: {
+            ScoreSets: {
+                $split: [
+                    { $trim: { input: { $replaceAll: { input: { $toString: "$Score" }, find: ",", replacement: " " } } } },
+                    " "
+                ]
+            },
+            WL_Bool: { $cond: [{ $eq: ["$WL", "W"] }, 1, 0] }
+        }
+    },
+    {
+        $project: { WL: 0 }
+    },
+    {
+        $merge: { into: "Player_Per_Game", on: "_id", whenMatched: "merge" }
+    }
+], { allowDiskUse: true });
+
+print("✓ Scores normalizados\n");
+
+// ============================================================================
+// 14. ESTATÍSTICAS FINAIS
+// ============================================================================
+
+print("\n═══ ESTATÍSTICAS FINAIS ═══\n");
+
+const stats = {
+    players: db.Players.countDocuments(),
+    playersWithCode: db.Players.countDocuments({ CountryCode: { $nin: [null, "", "UNK"] } }),
+    tournaments: db.Tournaments.countDocuments(),
+    tournamentsWithCode: db.Tournaments.countDocuments({ CountryCode: { $nin: [null, "", "UNK"] } }),
+    games: db.Player_Per_Game.countDocuments()
+};
+
+print(`Players: ${stats.players}`);
+print(`  → Com CountryCode: ${stats.playersWithCode} (${(stats.playersWithCode/stats.players*100).toFixed(1)}%)\n`);
+
+print(`Tournaments: ${stats.tournaments}`);
+print(`  → Com CountryCode: ${stats.tournamentsWithCode} (${(stats.tournamentsWithCode/stats.tournaments*100).toFixed(1)}%)\n`);
+
+print(`Player_Per_Game: ${stats.games} jogos\n`);
+
+print("Top 5 países (Players):");
+db.Players.aggregate([
+    { $match: { CountryCode: { $nin: [null, "", "UNK"] } } },
+    { $group: { _id: "$CountryCode", count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 5 }
+]).forEach(d => print(`  ${d._id}: ${d.count}`));
+
+print("\nTop 5 países (Tournaments):");
+db.Tournaments.aggregate([
+    { $match: { CountryCode: { $nin: [null, "", "UNK"] } } },
+    { $group: { _id: "$CountryCode", count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 5 }
+]).forEach(d => print(`  ${d._id}: ${d.count}`));
+
+print("\n╔════════════════════════════════════════════════════════════════╗");
+print("║   ✓ SCRIPT CONCLUÍDO COM SUCESSO                              ║");
+print("╚════════════════════════════════════════════════════════════════╝");
