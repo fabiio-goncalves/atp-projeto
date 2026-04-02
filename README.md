@@ -12,32 +12,32 @@ The workflow includes data ingestion, cleaning, transformation, and relational m
 
 The project follows an ETL process:
 
-1. **Data Ingestion**
+### 1. Data Ingestion
 
-   * Imported raw JSON and CSV datasets into MongoDB
+* Imported raw JSON and CSV datasets into MongoDB
 
-2. **Data Cleaning & Transformation (MongoDB)**
+### 2. Data Cleaning & Transformation (MongoDB)
 
-   * Removed duplicates and invalid records
-   * Handled missing values (e.g., height, dates, surfaces)
-   * Fixed encoding issues in player names
-   * Normalized attributes (Score, Country, Ground)
-   * Split composite fields (e.g., Location → City + Country)
-   * Used aggregation pipelines (`$group`, `$project`, `$merge`)
+* Removed duplicates and invalid records
+* Handled missing values (e.g., height, dates, surfaces)
+* Fixed encoding issues in player names
+* Normalized attributes (Score, Country, Ground)
+* Split composite fields (e.g., Location → City + Country)
+* Used aggregation pipelines (`$group`, `$project`, `$merge`)
 
-3. **Data Migration**
+### 3. Data Migration
 
-   * Exported cleaned data to MySQL using Python
+* Exported cleaned data to MySQL using Python
 
-4. **Relational Modeling (MySQL)**
+### 4. Relational Modeling (MySQL)
 
-   * Designed normalized schema:
+* Designed normalized schema:
 
-     * Players
-     * Tournaments
-     * Player_Per_Game
-     * Countries
-   * Implemented primary and foreign keys
+  * Players
+  * Tournaments
+  * Player_Per_Game
+  * Countries
+* Implemented primary and foreign keys
 
 ---
 
@@ -48,6 +48,18 @@ The project follows an ETL process:
 * MongoDB aggregation pipelines
 * Relational database design
 * Automated ETL with Python
+
+---
+
+## Example Queries & Results
+
+The structured database enables complex analytical queries on ATP tennis data.
+
+### Top 10 Players by Win Percentage
+
+This query calculates the win percentage of players based on total matches played, filtering those with sufficient match history and ranking them by performance.
+
+![Top Players by Win %](query_result.png)
 
 ---
 
@@ -63,23 +75,23 @@ The project follows an ETL process:
 
 1. Import data into MongoDB:
 
-   ```bash
-   mongoimport --db ATP --collection matches --file atpplayers.json
-   ```
+```bash
+mongoimport --db ATP --collection matches --file atpplayers.json
+```
 
 2. Run cleaning scripts in MongoDB
 
 3. Export and load into MySQL:
 
-   ```bash
-   python import_script.py
-   ```
+```bash
+python import_script.py
+```
 
 4. Execute SQL:
 
-   ```bash
-   atpscript.sql
-   ```
+```bash
+atpscript.sql
+```
 
 ---
 
@@ -88,3 +100,4 @@ The project follows an ETL process:
 The full dataset (~173MB) is not included due to size limitations.
 
 The database can be reconstructed using the provided scripts.
+
