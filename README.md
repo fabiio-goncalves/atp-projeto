@@ -1,28 +1,90 @@
-# ATP Projeto
+# ATP Data Engineering Project
 
-## 📌 Descrição
-Este projeto tem como objetivo a análise e tratamento de dados da ATP (ténis profissional masculino), incluindo limpeza, transformação e modelação de dados.
+## Overview
 
-## 🛠 Tecnologias
-- MongoDB  
-- MySQL  
-- Python (para importação)
+This project focuses on building a complete data pipeline for ATP (men’s professional tennis) data, transforming raw datasets into a structured relational database for analysis.
 
-## 📂 Estrutura
-- Scripts SQL e MongoDB  
-- Datasets CSV  
-- Relatório final  
-- Resultados das queries  
+The workflow includes data ingestion, cleaning, transformation, and relational modeling.
 
-## ▶️ Como executar
-1. Importar dados para MongoDB  
-2. Executar script de limpeza (`atpscript.json`)  
-3. Exportar para MySQL  
-4. Executar script SQL (`atpscript.sql`)  
+---
 
-## ⚠️ Nota
-O ficheiro completo da base de dados (`atpdb.sql`) não foi incluído devido ao seu tamanho elevado (~173MB), excedendo o limite do GitHub para upload direto.
+## Data Pipeline
 
-A base de dados pode ser totalmente recriada através dos scripts fornecidos neste repositório.
+The project follows an ETL process:
 
-Caso necessário, o ficheiro pode ser disponibilizado externamente mediante pedido.
+1. **Data Ingestion**
+
+   * Imported raw JSON and CSV datasets into MongoDB
+
+2. **Data Cleaning & Transformation (MongoDB)**
+
+   * Removed duplicates and invalid records
+   * Handled missing values (e.g., height, dates, surfaces)
+   * Fixed encoding issues in player names
+   * Normalized attributes (Score, Country, Ground)
+   * Split composite fields (e.g., Location → City + Country)
+   * Used aggregation pipelines (`$group`, `$project`, `$merge`)
+
+3. **Data Migration**
+
+   * Exported cleaned data to MySQL using Python
+
+4. **Relational Modeling (MySQL)**
+
+   * Designed normalized schema:
+
+     * Players
+     * Tournaments
+     * Player_Per_Game
+     * Countries
+   * Implemented primary and foreign keys
+
+---
+
+## Key Features
+
+* Data cleaning on large dataset (~1M+ records)
+* Handling missing and inconsistent data
+* MongoDB aggregation pipelines
+* Relational database design
+* Automated ETL with Python
+
+---
+
+## Technologies
+
+* MongoDB
+* MySQL
+* Python
+
+---
+
+## How to Run
+
+1. Import data into MongoDB:
+
+   ```bash
+   mongoimport --db ATP --collection matches --file atpplayers.json
+   ```
+
+2. Run cleaning scripts in MongoDB
+
+3. Export and load into MySQL:
+
+   ```bash
+   python import_script.py
+   ```
+
+4. Execute SQL:
+
+   ```bash
+   atpscript.sql
+   ```
+
+---
+
+## Notes
+
+The full dataset (~173MB) is not included due to size limitations.
+
+The database can be reconstructed using the provided scripts.
