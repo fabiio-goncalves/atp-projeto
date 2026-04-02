@@ -13,41 +13,36 @@ The workflow includes data ingestion, cleaning, transformation, and relational m
 The project follows an ETL process:
 
 ### 1. Data Ingestion
-
-* Imported raw JSON and CSV datasets into MongoDB
+- Imported raw JSON and CSV datasets into MongoDB
 
 ### 2. Data Cleaning & Transformation (MongoDB)
-
-* Removed duplicates and invalid records
-* Handled missing values (e.g., height, dates, surfaces)
-* Fixed encoding issues in player names
-* Normalized attributes (Score, Country, Ground)
-* Split composite fields (e.g., Location → City + Country)
-* Used aggregation pipelines (`$group`, `$project`, `$merge`)
+- Removed duplicates and invalid records
+- Handled missing values (e.g., height, dates, surfaces)
+- Fixed encoding issues in player names
+- Normalized attributes (Score, Country, Ground)
+- Split composite fields (e.g., Location → City + Country)
+- Used aggregation pipelines (`$group`, `$project`, `$merge`)
 
 ### 3. Data Migration
-
-* Exported cleaned data to MySQL using Python
+- Exported cleaned data to MySQL using Python
 
 ### 4. Relational Modeling (MySQL)
-
-* Designed normalized schema:
-
-  * Players
-  * Tournaments
-  * Player_Per_Game
-  * Countries
-* Implemented primary and foreign keys
+- Designed normalized schema:
+  - Players
+  - Tournaments
+  - Player_Per_Game
+  - Countries
+- Implemented primary and foreign keys
 
 ---
 
 ## Key Features
 
-* Data cleaning on large dataset (~1M+ records)
-* Handling missing and inconsistent data
-* MongoDB aggregation pipelines
-* Relational database design
-* Automated ETL with Python
+- Data cleaning on large-scale dataset (~1M+ records)
+- Handling missing and inconsistent data
+- MongoDB aggregation pipelines
+- Relational database design
+- Automated ETL with Python
 
 ---
 
@@ -59,15 +54,19 @@ The structured database enables complex analytical queries on ATP tennis data.
 
 This query calculates the win percentage of players based on total matches played, filtering those with sufficient match history and ranking them by performance.
 
+### Example Output
+
+The following table shows the top players ranked by win percentage:
+
 ![Top Players by Win %](query_result.png)
 
 ---
 
 ## Technologies
 
-* MongoDB
-* MySQL
-* Python
+- MongoDB
+- MySQL
+- Python
 
 ---
 
@@ -77,27 +76,3 @@ This query calculates the win percentage of players based on total matches playe
 
 ```bash
 mongoimport --db ATP --collection matches --file atpplayers.json
-```
-
-2. Run cleaning scripts in MongoDB
-
-3. Export and load into MySQL:
-
-```bash
-python import_script.py
-```
-
-4. Execute SQL:
-
-```bash
-atpscript.sql
-```
-
----
-
-## Notes
-
-The full dataset (~173MB) is not included due to size limitations.
-
-The database can be reconstructed using the provided scripts.
-
